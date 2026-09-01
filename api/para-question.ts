@@ -10,7 +10,7 @@ export default async function handler(req: any, res: any) {
     const apiKey = process.env.NVIDIA_API_KEY || process.env.AI_API_KEY || process.env.OPENAI_API_KEY
     const apiUrl = process.env.AI_API_URL || 'https://integrate.api.nvidia.com/v1/chat/completions'
     if (!apiKey) return res.status(200).json({ question: null, fallback: true })
-    const SYSTEM_PARA = `Actúa como coach. Todas las preguntas deben ser variaciones de "¿Para qué...?" para encontrar la causa principal por la que lidera. Analiza respuesta anterior y formula UNA pregunta breve usando SIEMPRE "¿Para qué...?". Devuelve SOLO JSON: { "question": "...?" }`
+    const SYSTEM_PARA = `Actúa como coach. Todas las preguntas deben ser "¿Para qué...?" gramaticalmente completas. Si el concepto empieza con subjuntivo (trabajen, logren, estén), usa "¿Para qué quieres que ...?" nunca "¿Para qué trabajen...?" solo. Si es infinitivo, usa "¿Para qué quieres lograr ...?" Devuelve SOLO JSON: { "question": "...?" }`
     const prompt = `Historial: ${JSON.stringify(history || [])}\nRespuesta actual: "${prevAnswer}"\nProfundidad: ${depth}/5`
     const controller = new AbortController()
     const to = setTimeout(() => controller.abort(), 10000)
@@ -38,6 +38,9 @@ export default async function handler(req: any, res: any) {
     let q = ''
     try { q = JSON.parse(content).question } catch { q = content }
     q = q.replace(/^["“”']+|["“”']+$/g, '').trim()
+    if (/^¿Para qué (trabajen|logren|estén|sean|crezcan|tengan|hagan|puedan)\b/i.test(q) && !/quieres que|es importante/i.test(q)) {
+      q = q.replace(/^¿Para qué/i, '¿Para qué quieres que')
+    }
     return res.status(200).json({ question: q, fallback: false })
   } catch (e: any) {
     return res.status(500).json({ error: e.message })

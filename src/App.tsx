@@ -121,13 +121,14 @@ function generateParaQuestion(prev:string, idx:number){
   if((coreLower.includes('ayudar') || coreLower.includes('apoyar')) && prev.trim().length<30){
     return '¿A quién quieres ayudar y qué quisieras que cambie para esa persona?'
   }
-  // Todas deben ser "¿Para qué...?" para llegar a la causa raíz
+  // Todas "¿Para qué...?" - con corrección: si core es subjuntivo (trabajen) usar "quieres que", si es infinitivo (evitar) citar
+  const isSubj = /^(trabajen|logren|estén|sean|crezcan|tengan|sientan|sean|hagan|puedan)\b/i.test(core)
   const templates:string[]=[
     `Dijiste que quieres "${core}". ¿Para qué es importante para ti que eso suceda?`,
     `¿Y para qué es importante para ti "${core}"?`,
-    `¿Para qué quieres lograr "${core}"?`,
-    `¿Para qué es realmente importante para ti "${core}" más allá del resultado?`,
-    `¿Para qué te gustaría que, si logras "${core}" durante los próximos años, eso trascienda en tu equipo?`
+    isSubj ? `¿Para qué quieres que ${core}?` : `¿Para qué quieres lograr "${core}"?`,
+    isSubj ? `¿Para qué es realmente importante para ti que ${core}?` : `¿Para qué es realmente importante para ti "${core}" más allá del resultado?`,
+    isSubj ? `¿Para qué quieres que ${core} trascienda en tu equipo?` : `¿Para qué te gustaría que "${core}" trascienda si lo logras?`
   ]
   // idx 1-> template 0, idx2->1, idx3->2, idx4->3, idx5 special 4 if deep
   if(idx===1) return templates[0]
