@@ -32,6 +32,14 @@ type Answers = {
   q11_evidencia: string
   nombre: string
   anonimo: boolean
+  // Los 5 Para Qué
+  para1: string
+  para2: string
+  para3: string
+  para4: string
+  para5: string
+  purposeAI: string
+  purposeFinal: string
 }
 
 type Assessment = {
@@ -47,9 +55,10 @@ type Assessment = {
   empezar_a: string[]
   siguiente_nivel: { nivel: string; explicacion: string; clave: string }
   reto_7_dias: { titulo: string; accion: string; momento: string; evidencia: string }
-  playbook: { yo: string; ellos: string; nosotros: string; jugada: string }
+  playbook: { yo: string; ellos: string; nosotros: string; jugada: string; nucleo: string }
   frase_final: string
-  evolution: number // 1,2,3
+  evolution: number
+  purpose: string
 }
 
 const genericPhrases = [
@@ -73,30 +82,117 @@ function scoreText(text: string, keywords: string[], anti: string[] = []) {
   else if (text.trim().length < 50) score += 2
   else if (text.trim().length < 100) score += 3
   else score += 4
-
   const concrete = ['voy a', 'cuando', 'con ', 'pregunta', 'escuchar', 'propuesta', 'reunión', 'lunes', 'martes', 'semana', 'equipo', 'alex']
   let kwHits = 0
   keywords.forEach(k => { if (t.includes(k)) kwHits++ })
   score += Math.min(3, kwHits)
-
   concrete.forEach(c => { if (t.includes(c)) score += 0.3 })
-
   anti.forEach(a => { if (t.includes(a)) score -= 1 })
-
   if (isGeneric(text)) score -= 2
-
-  // count questions ?
   if (text.includes('?')) score += 1
+  return Math.max(0, Math.min(5, Math.round(score)))
+}
 
+// --- Los 5 Para Qué helpers ---
+function extractCore(prev: string){
+  let s = prev.trim().replace(/^["“”']+|["“”']+$/g,'')
+  s = s.replace(/^(para|porque|quiero|lidero para|lidero|para que)\s+/i,'').trim()
+  s = s.replace(/\.$/, '').trim()
+  if(s.length>65) s = s.slice(0,65).trim() + '…'
+  return s || prev.slice(0,50)
+}
+function isRepetitive(a:string,b:string){
+  if(!a||!b) return false
+  const al=a.toLowerCase().trim(), bl=b.toLowerCase().trim()
+  if(al===bl) return true
+  // check same keywords
+  const wa = new Set(al.split(/\s+/).filter(w=>w.length>3))
+  const wb = new Set(bl.split(/\s+/).filter(w=>w.length>3))
+  let inter=0; wa.forEach(w=>{ if(wb.has(w)) inter++ })
+  return inter>=2 && Math.abs(al.length-bl.length)<25
+}
+function generateParaQuestion(prev:string, idx:number){
+  const core = extractCore(prev)
+  const coreLower = core.toLowerCase()
+  // abstract handling
+  if(coreLower.includes('ser mejor') || (coreLower==='mejor' || coreLower.includes('ser mejor'))) {
+    return '¿Mejor para quién? ¿Qué cambiaría concretamente si eso sucediera?'
+  }
+  if((coreLower.includes('ayudar') || coreLower.includes('apoyar')) && prev.trim().length<30){
+    return '¿A quién quieres ayudar y qué quisieras que cambie para esa persona?'
+  }
+  // repetitive will be handled by caller, but fallback
+  const templates:string[]=[
+    `Dijiste que quieres "${core}". ¿Para qué es importante para ti que eso suceda?`,
+    `¿Y para qué es importante para ti que ${core}?`,
+    `¿Para qué quieres que ${core}?`,
+    `¿Qué hace que eso sea realmente importante para ti?`,
+    `Si consiguieras eso durante los próximos años, ¿qué te gustaría que esas personas recordaran de tu liderazgo?`
+  ]
+  // idx 1-> template 0, idx2->1, idx3->2, idx4->3, idx5 special 4 if deep
+  if(idx===1) return templates[0]
+  if(idx===2) return templates[1]
+  if(idx===3) return templates[2]
+  if(idx===4) return templates[3]
+  return templates[4]
+}
+function synthesizePurpose(answers: string[]){
+  const cleaned = answers.map(a=> a.trim()).filter(a=>a.length>8)
+  if(cleaned.length===0) return 'Lidero para contribuir al crecimiento de mi equipo.'
+  // take deepest 2 and combine
+  let deepest = cleaned[cleaned.length-1].replace(/^(para|porque|quiero|lidero para)\s+/i,'').trim()
+  // ensure first letter lower unless starts with capital for style, keep as is
+  // remove trailing dot
+  deepest = deepest.replace(/\.$/,'').trim()
+  // if deepest is very short, append previous
+  if(deepest.length<15 && cleaned.length>=2){
+    const prev = cleaned[cleaned.length-2].replace(/^(para|porque)\s+/i,'').trim().replace(/\.$/,'')
+    deepest = `${prev} y ${deepest}`
+  }
+  // ensure starts with verb phrase
+  let purpose = deepest
+  // capitalize first
+  purpose = purpose.charAt(0).toLowerCase() + purpose.slice(1)
+  return `Lidero para ${purpose}.`
+}
+function scoreClarity(paraAnswers: string[]){
+  if(paraAnswers.every(a=> !a.trim())) return 0
+  const filled = paraAnswers.filter(a=> a.trim().length>=10)
+  const depthKeywords = [
+    ['cumplir','objetivos','indicadores','resultados','trabajo'], // A
+    ['mejores','éxito','metas','eficientes','destacar'], // B
+    ['equipo','juntos','confianza','colaborar','autonomia'], // C
+    ['crecer','aprender','desarroll','capaces','oportunidades','personas'], // D
+    ['impactar','servir','contribuir','transformar','positivamente'], // E
+    ['permanezca','legado','futuros','cuando ya no','continuar'], // F
+  ]
+  let maxDepth = 0
+  paraAnswers.forEach(a=>{
+    const l=a.toLowerCase()
+    depthKeywords.forEach((kw,i)=>{
+      if(kw.some(k=> l.includes(k))) maxDepth = Math.max(maxDepth, i+1)
+    })
+  })
+  const avgLen = paraAnswers.filter(a=>a.trim()).reduce((s,a)=>s+a.length,0)/Math.max(1, paraAnswers.filter(a=>a.trim()).length)
+  let score = 0
+  score += (maxDepth/6)*3.5 // 0-3.5
+  if(avgLen>40) score+=0.7
+  if(avgLen>80) score+=0.3
+  if(filled.length>=5) score+=0.5
+  else if(filled.length>=3) score+=0.2
+  // coherence: progression
+  if(maxDepth>=4) score+=0.5
   return Math.max(0, Math.min(5, Math.round(score)))
 }
 
 function evaluate(answers: Answers): Assessment {
-  // YO: q1,q2,q3
+  const paraAnswers = [answers.para1, answers.para2, answers.para3, answers.para4, answers.para5]
+  const clarityScore = scoreClarity(paraAnswers)
   const yoScores = [
     scoreText(answers.q1, ['dependencia', 'control', 'resolver', 'yo', 'decide', 'deja', 'confianza', 'ego'], ['ellos no', 'culpa']),
     scoreText(answers.q2_dejar + ' ' + answers.q2_empezar, ['dejar de controlar', 'preguntar', 'escuchar', 'delegar', 'acompañar', 'confiar'], []),
     scoreText(answers.q3, ['ego', 'control', 'miedo', 'confianza', 'hábito', 'presión', 'rapidez', 'seguridad'], []),
+    clarityScore,
   ]
   const yoAvg = yoScores.reduce((a,b)=>a+b,0)/yoScores.length
   const yo = Math.round((yoAvg/5)*100)
@@ -129,35 +225,30 @@ function evaluate(answers: Answers): Assessment {
     return Math.round((Math.max(0, Math.min(5, s))/5)*100)
   })()
 
-  // penalize humildad/generosidad not chosen? small bonus if Ambos
   let nosAdj = nosotros
   if (answers.q9_valor === 'Ambos') nosAdj = Math.min(100, nosAdj + 4)
 
   const yen = Math.round(yo*0.30 + ellos*0.30 + nosAdj*0.30 + ejec*0.10)
 
-  // determine level
   let nivel = 1
   let nombre = 'YO'
   if (yo >= 60 && ellos >= 65 && nosAdj >= 70) { nivel = 3; nombre = 'NOSOTROS' }
   else if (yo >= 55 && ellos >= 60 && nosAdj >= 50) { nivel = 2; nombre = 'ELLOS' }
-  // override if ellos very low
   if (ellos < 55 || nosAdj < 50) { if (nivel !== 1) { nivel = 1; nombre = 'YO' } }
 
-  // subnivel
   const avgForSub = nivel===1 ? yo : nivel===2 ? ellos : nosAdj
   let subnivel = 'Emergente'
   if (avgForSub >= 75) subnivel = 'Consistente'
   else if (avgForSub >= 60) subnivel = 'En desarrollo'
 
-  // diagnostico personalizado
   let diagnostico = ''
-  if (nivel===1) diagnostico = `Tus respuestas muestran que hoy tu liderazgo se concentra principalmente en resolver y asegurar resultados. Tiendes a tomar el control cuando aparece presión. Reconoces parte de esa dependencia (${answers.q1.slice(0,70)}...), pero todavía aparece la idea de que avanzar es más rápido si tú intervienes.`
-  else if (nivel===2) diagnostico = `Has comenzado a dejar atrás el liderazgo basado solo en control. Destacan tus intentos por comprender a Alex y preguntar antes de actuar. Tu fortaleza está en la escucha y la conversación. La oportunidad es transformar esas conversaciones en acuerdos colectivos y reglas que sostengan al equipo sin depender de que tú estés presente.`
-  else diagnostico = `Tu forma de plantear la situación muestra un liderazgo que multiplica. Hablas de reglas de equipo, propósito compartido y autonomía. Ya no se trata de resolver por otros, sino de construir condiciones para que el equipo piense y decida junto. El reto es sostener esa cultura con coherencia diaria.`
+  if (nivel===1) diagnostico = `Tus respuestas muestran que hoy tu liderazgo se concentra principalmente en resolver y asegurar resultados. Tiendes a tomar el control cuando aparece presión. Reconoces parte de esa dependencia (${answers.q1.slice(0,70)}...), pero todavía aparece la idea de que avanzar es más rápido si tú intervienes. Tu para qué aún está en construcción: ${answers.purposeFinal ? `"${answers.purposeFinal.slice(0,80)}..."` : 'está emergiendo hacia el desarrollo de personas.'}`
+  else if (nivel===2) diagnostico = `Has comenzado a dejar atrás el liderazgo basado solo en control. Destacan tus intentos por comprender a Alex y preguntar antes de actuar. Tu para qué —“${answers.purposeFinal || answers.purposeAI || 'liderar para hacer crecer'}”— muestra una transición de resultados a personas. La oportunidad es transformar esas conversaciones en acuerdos colectivos y reglas que sostengan al equipo sin depender de que tú estés presente.`
+  else diagnostico = `Tu forma de plantear la situación muestra un liderazgo que multiplica. Hablas de reglas de equipo, propósito compartido y autonomía. Tu núcleo “${answers.purposeFinal || answers.purposeAI}” ya conecta YO-ELLOS-NOSOTROS. El reto es sostener esa cultura con coherencia diaria.`
 
-  // fortalezas
   const fortalezas = []
   if (yo > 60) fortalezas.push({titulo:'Autocrítica responsable', explicacion:'Reconoces tu parte en la dependencia del equipo y no culpabilizas solo a los demás.', evidencia:`"${answers.q1.slice(0,90)}..."`})
+  else if(clarityScore>=3) fortalezas.push({titulo:'Propósito en construcción', explicacion:'Tu ejercicio de los 5 Para Qué muestra búsqueda de un porqué más allá de la tarea.', evidencia:`"${answers.purposeFinal.slice(0,90)}"`})
   else fortalezas.push({titulo:'Intención de mejorar', explicacion:'Muestras apertura para mirar tu propio comportamiento, base para crecer.', evidencia:`"${answers.q3.slice(0,90)}..."`})
 
   if (ellos > 60) fortalezas.push({titulo:'Buscas comprender antes de corregir', explicacion:'Propones preguntar y escuchar a Alex en lugar de juzgarlo directamente.', evidencia:`"${answers.q4.slice(0,90)}..."`})
@@ -193,18 +284,22 @@ function evaluate(answers: Answers): Assessment {
   else if (nivel===2) { siguiente_expl = 'Ya escuchas y comprendes. Ahora necesitas convertir esas conversaciones en acuerdos colectivos que generen autonomía.'; clave='Transforma conversaciones en reglas.' }
   else { siguiente_expl = 'Estás construyendo autonomía. Tu reto es cuidar la cultura para que el equipo funcione bien incluso cuando tú no estés.'; clave='Sostén la cultura con coherencia.' }
 
+  const retoBase = answers.q11_accion || 'En la próxima reunión presenta el problema sin solución y pide tres propuestas.'
+  // enrich reto with purpose
+  const retoAccion = answers.purposeFinal ? `${retoBase} — conectado a tu propósito: "${answers.purposeFinal}"` : retoBase
   const reto = {
     titulo: 'Tu reto de esta semana',
-    accion: answers.q11_accion || 'En la próxima reunión presenta el problema sin solución y pide tres propuestas.',
+    accion: retoAccion,
     momento: answers.q11_cuando || 'Próxima reunión de equipo',
     evidencia: answers.q11_evidencia || 'Tener al menos tres propuestas escritas antes de decidir.'
   }
 
   const playbook = {
-    yo: `Dejar de ${answers.q2_dejar || 'controlar cada detalle'} y empezar a ${answers.q2_empezar || 'preguntar y confiar'}. Reconocer que el ego y la urgencia te llevan a resolver tú.`,
-    ellos: `Conversar con ${answers.q11_quien || 'Alex'} preguntando "${answers.q6b || '¿Qué es lo que más te motiva de tu trabajo?'}" y explorando bloqueos: ${answers.q5.slice(0,80)}...`,
-    nosotros: `Regla viva: "${answers.q7}" — sostenerla con: ${answers.q8.slice(0,100)}... Valor clave: ${answers.q9_valor} porque ${answers.q9_porQue.slice(0,80)}...`,
-    jugada: `${answers.q11_accion} con ${answers.q11_quien} el ${answers.q11_cuando}. Evidencia: ${answers.q11_evidencia}`
+    yo: `Dejar de ${answers.q2_dejar || 'controlar cada detalle'} y empezar a ${answers.q2_empezar || 'preguntar y confiar'}. Propósito: ${answers.purposeFinal || answers.purposeAI || 'en construcción'}.`,
+    ellos: `Conversar con ${answers.q11_quien || 'Alex'} preguntando "${answers.q6b || '¿Qué es lo que más te motiva de tu trabajo?'}" y explorando bloqueos: ${answers.q5.slice(0,80)}... ¿Esta conversación te acerca a tu propósito?`,
+    nosotros: `Regla viva: "${answers.q7}" — sostenerla con: ${answers.q8.slice(0,100)}... Valor clave: ${answers.q9_valor} porque ${answers.q9_porQue.slice(0,80)}... Para que tu propósito no dependa solo de ti.`,
+    jugada: `${answers.q11_accion} con ${answers.q11_quien} el ${answers.q11_cuando}. Evidencia: ${answers.q11_evidencia} — viviendo tu propósito: ${answers.purposeFinal || ''}`,
+    nucleo: answers.purposeFinal || answers.purposeAI || 'Lidero para contribuir al crecimiento de mi equipo.'
   }
 
   const frases: Record<number,string> = {
@@ -228,7 +323,8 @@ function evaluate(answers: Answers): Assessment {
     reto_7_dias: reto,
     playbook,
     frase_final: frases[nivel],
-    evolution
+    evolution,
+    purpose: answers.purposeFinal || answers.purposeAI
   }
 }
 
@@ -265,7 +361,6 @@ function downloadPDF(assessment: Assessment, answers: Answers){
   function p(text:string, size=8, bold=false){
     doc.setFont('helvetica', bold ? 'bold':'normal'); doc.setFontSize(size)
     const lines = doc.splitTextToSize(text, pageW - margin*2)
-    // @ts-ignore
     const h = lines.length * lineH
     checkPage(h)
     doc.text(lines, margin, y)
@@ -279,7 +374,6 @@ function downloadPDF(assessment: Assessment, answers: Answers){
     y+= lines.length*lineH +1
   }
 
-  // Header
   doc.setFillColor(7,29,73)
   doc.rect(0,0,pageW,28,'F')
   doc.setTextColor(255,255,255)
@@ -294,6 +388,13 @@ function downloadPDF(assessment: Assessment, answers: Answers){
   titleBar(`Indice Y.E.N.  ${assessment.indice_yen} / 100   —   Nivel ${assessment.nivel} — ${assessment.nombre_nivel}  (${assessment.subnivel})`)
   h2('Gráfica Y.E.N.')
   p(`YO: ${assessment.scores.yo}   |   ELLOS: ${assessment.scores.ellos}   |   NOSOTROS: ${assessment.scores.nosotros}   |   EJECUCIÓN: ${assessment.scores.ejecucion}`, 8, true)
+  h2('Mi Para Qué — Núcleo de liderazgo')
+  p(assessment.purpose || 'No definido', 9, true)
+  // Para Qué trace
+  h2('Travesía de los 5 Para Qué')
+  ;[answers.para1, answers.para2, answers.para3, answers.para4, answers.para5].forEach((a,i)=>{
+    if(a) p(`${i+1}. ${a}`, 7)
+  })
   h2('Interpretación personalizada')
   p(assessment.diagnostico, 8)
   h2('Lo que ya estás haciendo bien')
@@ -318,10 +419,12 @@ function downloadPDF(assessment: Assessment, answers: Answers){
   p(`${assessment.reto_7_dias.titulo}: ${assessment.reto_7_dias.accion}`, 8, true)
   p(`Momento: ${assessment.reto_7_dias.momento}   |   Persona: ${answers.q11_quien}   |   Evidencia: ${assessment.reto_7_dias.evidencia}`, 7)
   h2('Playbook personal')
+  p(`MI NÚCLEO: ${assessment.playbook.nucleo}`, 8, true)
   p(`YO: ${assessment.playbook.yo}`, 7)
   p(`ELLOS: ${assessment.playbook.ellos}`, 7)
   p(`NOSOTROS: ${assessment.playbook.nosotros}`, 7)
   p(`MI JUGADA (7 días): ${assessment.playbook.jugada}`, 7)
+  p(`DE TU PARA QUÉ A TU LEGADO: ${assessment.purpose} → ${answers.q2_empezar.slice(0,40)} → Equipo capaz → Legado que permanece.`,7,true)
 
   titleBar('Frase final')
   doc.setFont('helvetica','bold'); doc.setFontSize(10)
@@ -344,68 +447,90 @@ export default function App(){
   const [step, setStep] = useState(0)
   const [answers, setAnswers] = useState<Answers>({
     q1:'', q2_dejar:'', q2_empezar:'', q3:'', q4:'', q5:'', q6:'', q6b:'',
-    q7:'', q8:'', q9_valor:'', q9_porQue:'', q10:'', q11_accion:'', q11_quien:'', q11_cuando:'', q11_evidencia:'', nombre:'', anonimo:false
+    q7:'', q8:'', q9_valor:'', q9_porQue:'', q10:'', q11_accion:'', q11_quien:'', q11_cuando:'', q11_evidencia:'', nombre:'', anonimo:false,
+    para1:'', para2:'', para3:'', para4:'', para5:'', purposeAI:'', purposeFinal:''
   })
+  const [paraQs, setParaQs] = useState<string[]>([
+    '¿Para qué lideras a tu equipo?',
+    '', '', '', ''
+  ])
   const [showConcrete, setShowConcrete] = useState(false)
   const [concreteMsg, setConcreteMsg] = useState('')
   const [assessment, setAssessment] = useState<Assessment|null>(null)
   const [calculating, setCalculating] = useState(false)
   const [progressPhrase, setProgressPhrase] = useState(0)
+  const [editingPurpose, setEditingPurpose] = useState(false)
+  const [tempPurpose, setTempPurpose] = useState('')
   const mainRef = useRef<HTMLDivElement>(null)
 
   useEffect(()=>{ mainRef.current?.scrollTo(0,0); window.scrollTo(0,0) },[step])
 
-  const totalQuestions = 13 // for progress
+  // total steps 0..24
+  const totalQuestions = 18
   const currentQIndex = (() => {
     if (step<=1) return 0
-    if (step===2) return 1
-    if (step===3) return 2
-    if (step===4) return 3
-    if (step===5) return 4
-    if (step===6) return 5
-    if (step===7) return 6
-    if (step===8) return 7
-    if (step===9) return 8
-    if (step===10) return 9
-    if (step===11) return 10
-    if (step===12) return 11
-    if (step===13) return 12
-    return 13
+    if (step===2) return 1 // q1
+    if (step===3) return 1 // intro paraque transitional
+    if (step===4) return 2 // para intro arma
+    if (step===5) return 3 // p1
+    if (step===6) return 4 // p2
+    if (step===7) return 5 // p3
+    if (step===8) return 6 // p4
+    if (step===9) return 7 // p5
+    if (step===10) return 8 // descubrimiento
+    if (step===11) return 8 // confirm
+    if (step===12) return 9 // conexion
+    if (step===13) return 10 // dejar
+    if (step===14) return 11 // q3
+    if (step===15) return 12 // ellos q4
+    if (step===16) return 13 // q5
+    if (step===17) return 14 // q6
+    if (step===18) return 15 // q6b
+    if (step===19) return 16 // nosotros q7
+    if (step===20) return 17 // q8
+    if (step===21) return 18 // q9
+    if (step===22) return 19 // q10
+    if (step===23) return 20 // jugada
+    return 20
   })()
 
   const phase = (() => {
     if (step<=1) return 'inicio'
-    if (step<=4) return 'YO'
-    if (step<=8) return 'ELLOS'
-    if (step<=12) return 'NOSOTROS'
-    if (step===13) return 'JUGADA'
+    if (step<=14) return 'YO'
+    if (step<=18) return 'ELLOS'
+    if (step<=22) return 'NOSOTROS'
+    if (step===23) return 'JUGADA'
     return 'RESULTADOS'
   })()
 
   const canNext = (() => {
     if (step===2) return answers.q1.trim().length>=10
-    if (step===3) return answers.q2_dejar.trim().length>=3 && answers.q2_empezar.trim().length>=3
-    if (step===4) return answers.q3.trim().length>=10
-    if (step===5) return answers.q4.trim().length>=10
-    if (step===6) return answers.q5.trim().length>=10
-    if (step===7) return answers.q6.trim().length>=10
-    if (step===8) return answers.q6b.trim().length>=8
-    if (step===9) return answers.q7.trim().length>=12
-    if (step===10) return answers.q8.trim().length>=10
-    if (step===11) return answers.q9_valor!=='' && answers.q9_porQue.trim().length>=10
-    if (step===12) return answers.q10.trim().length>=10
-    if (step===13) return answers.q11_accion.trim().length>=10 && answers.q11_quien.trim().length>=2 && answers.q11_cuando.trim().length>=4 && answers.q11_evidencia.trim().length>=8
+    if (step===5) return answers.para1.trim().length>=8
+    if (step===6) return answers.para2.trim().length>=8
+    if (step===7) return answers.para3.trim().length>=8
+    if (step===8) return answers.para4.trim().length>=8
+    if (step===9) return answers.para5.trim().length>=8
+    if (step===13) return answers.q2_dejar.trim().length>=3 && answers.q2_empezar.trim().length>=3
+    if (step===14) return answers.q3.trim().length>=10
+    if (step===15) return answers.q4.trim().length>=10
+    if (step===16) return answers.q5.trim().length>=10
+    if (step===17) return answers.q6.trim().length>=10
+    if (step===18) return answers.q6b.trim().length>=8
+    if (step===19) return answers.q7.trim().length>=12
+    if (step===20) return answers.q8.trim().length>=10
+    if (step===21) return answers.q9_valor!=='' && answers.q9_porQue.trim().length>=10
+    if (step===22) return answers.q10.trim().length>=10
+    if (step===23) return answers.q11_accion.trim().length>=10 && answers.q11_quien.trim().length>=2 && answers.q11_cuando.trim().length>=4 && answers.q11_evidencia.trim().length>=8
     return true
   })()
 
   function handleNext(){
-    // adaptive check
     const fieldsToCheck: Record<number, {val:string, msg:string}> = {
       2: { val: answers.q1, msg: 'Hazlo más concreto: ¿qué comportamiento exacto y en qué momento lo ves?' },
-      4: { val: answers.q3, msg: 'Profundiza: ¿qué miedo o hábito crees que hay detrás? ¿Qué gana el líder al no soltar?' },
-      5: { val: answers.q4, msg: 'Concreta: ¿qué le preguntarías a Alex para entender su mundo?' },
-      9: { val: answers.q7, msg: 'Haz la regla observable: “A partir de ahora, nosotros...” con verbo y momento.' },
-      13: { val: answers.q11_accion, msg: 'Concreta la acción con verbo observable: ¿qué harás exactamente?' },
+      14: { val: answers.q3, msg: 'Profundiza: ¿qué miedo o hábito crees que hay detrás? ¿Qué gana el líder al no soltar?' },
+      15: { val: answers.q4, msg: 'Concreta: ¿qué le preguntarías a Alex para entender su mundo?' },
+      19: { val: answers.q7, msg: 'Haz la regla observable: “A partir de ahora, nosotros...” con verbo y momento.' },
+      23: { val: answers.q11_accion, msg: 'Concreta la acción con verbo observable: ¿qué harás exactamente?' },
     }
     const check = fieldsToCheck[step]
     if (check && isGeneric(check.val)) {
@@ -413,9 +538,45 @@ export default function App(){
       setShowConcrete(true)
       return
     }
+    // Para Qué logic
+    if(step===5){
+      // after p1 generate q2
+      const nextQ = generateParaQuestion(answers.para1, 1)
+      setParaQs(p=>{ const n=[...p]; n[1]=nextQ; return n })
+    }
+    if(step===6){
+      if(isRepetitive(answers.para2, answers.para1)){
+        const aux = 'Parece que seguimos en el mismo punto. Vamos un poco más profundo. Imagina que mañana consigues esa meta. ¿Qué cambia para las personas gracias a haberla conseguido?'
+        setParaQs(p=>{ const n=[...p]; n[1]=aux; setConcreteMsg(aux); setShowConcrete(true); return n })
+        // still generate for next
+        const nextQ = generateParaQuestion(answers.para2, 2)
+        setParaQs(p=>{ const n=[...p]; n[2]=nextQ; return n })
+      } else {
+        const nextQ = generateParaQuestion(answers.para2, 2)
+        setParaQs(p=>{ const n=[...p]; n[2]=nextQ; return n })
+      }
+    }
+    if(step===7){
+      if(isRepetitive(answers.para3, answers.para2)){
+        const aux='Vamos un poco más profundo. ¿Qué hace que eso sea importante para ti más allá del resultado?'
+        setConcreteMsg(aux); setShowConcrete(true)
+      }
+      const nextQ = generateParaQuestion(answers.para3, 3)
+      setParaQs(p=>{ const n=[...p]; n[3]=nextQ; return n })
+    }
+    if(step===8){
+      const nextQ = generateParaQuestion(answers.para4, 4)
+      // if deep already, use legacy question
+      setParaQs(p=>{ const n=[...p]; n[4]=nextQ; return n })
+    }
+    if(step===9){
+      // synthesize purpose
+      const purpose = synthesizePurpose([answers.para1, answers.para2, answers.para3, answers.para4, answers.para5])
+      setAnswers(a=> ({...a, purposeAI: purpose, purposeFinal: purpose}))
+      setTempPurpose(purpose)
+    }
 
-    if (step===13){
-      // calculate
+    if (step===23){
       setCalculating(true)
       setProgressPhrase(0)
       const interval = setInterval(()=> setProgressPhrase(p=> p<3 ? p+1 : p), 700)
@@ -424,7 +585,7 @@ export default function App(){
         const res = evaluate(answers)
         setAssessment(res)
         setCalculating(false)
-        setStep(14)
+        setStep(24)
       }, 3000)
       return
     }
@@ -438,7 +599,6 @@ export default function App(){
 
   return (
     <div className="min-h-screen bg-[#F7F9FC] text-slate-800">
-      {/* Header */}
       <header className="sticky top-0 z-40 backdrop-blur bg-white/80 border-b border-slate-200">
         <div className="max-w-[1120px] mx-auto px-4 sm:px-6 h-[60px] flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -459,14 +619,12 @@ export default function App(){
           </div>
           <div className="text-[11px] text-slate-500 hidden md:block">8–12 min • Diagnóstico formativo</div>
         </div>
-        {/* progress */}
         <div className="h-[4px] bg-slate-100">
           <div className="h-full transition-all duration-700" style={{width: `${pct()}%`, background: phase==='YO'?C.azul:phase==='ELLOS'?C.rojo:phase==='NOSOTROS'?C.verde:phase==='JUGADA'?C.dorado:C.navy}}/>
         </div>
       </header>
 
       <main ref={mainRef} className="max-w-[860px] mx-auto px-4 sm:px-6 py-6 sm:py-10">
-        {/* STEP 0 INICIO */}
         {step===0 && (
           <div className="space-y-6 animate-[pulse-soft_1s]">
             <div className="bg-white rounded-[28px] p-6 sm:p-10 shadow-[0_12px_40px_rgba(7,29,73,0.08)] border border-slate-100 overflow-hidden relative">
@@ -511,7 +669,6 @@ export default function App(){
               <p className="text-[11px] text-slate-400 mt-4 leading-relaxed">Herramienta formativa Y.E.N. • Totalplay San Luis • Desarrollo de Liderazgo. No es evaluación psicológica ni psicométrica.</p>
             </div>
 
-            {/* footer mini */}
             <div className="grid grid-cols-3 gap-3">
               {[
                 {n:'YO', d:'Si tú no creces, tu equipo no crece.', c:C.azul},
@@ -528,7 +685,6 @@ export default function App(){
           </div>
         )}
 
-        {/* STEP 1 CASO */}
         {step===1 && (
           <div className="space-y-6">
             <div className="bg-white rounded-[28px] overflow-hidden shadow-[0_12px_40px_rgba(7,29,73,0.08)] border border-slate-100">
@@ -574,7 +730,6 @@ export default function App(){
           </div>
         )}
 
-        {/* GENERIC MODAL */}
         {showConcrete && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-[#071D49]/60 backdrop-blur" onClick={()=> setShowConcrete(false)}/>
@@ -588,7 +743,6 @@ export default function App(){
           </div>
         )}
 
-        {/* Q1 */}
         {step===2 && (
           <QuestionCard
             phase="YO" color={C.azul} stepLabel="NIVEL Y — YO" title="Antes de intentar cambiar al equipo, mírate a ti."
@@ -598,9 +752,141 @@ export default function App(){
             onNext={handleNext} canNext={canNext} progress={`${currentQIndex}/${totalQuestions}`}
           />
         )}
+
         {step===3 && (
+          <div className="bg-white rounded-[28px] p-6 sm:p-8 shadow border border-slate-100 text-center">
+            <div className="w-12 h-12 mx-auto rounded-full flex items-center justify-center text-white" style={{background:C.azul}}>🌱</div>
+            <div className="text-[11px] tracking-widest font-black mt-3" style={{color:C.azul}}>TRANSICIÓN</div>
+            <h2 className="font-black text-xl mt-2" style={{color:C.navy}}>Ya identificaste algunos comportamientos.<br/>Ahora vamos más profundo.</h2>
+            <p className="text-sm text-slate-600 mt-3 max-w-[520px] mx-auto">Antes de decidir <span className="font-bold">cómo</span> quieres liderar, necesitas recordar <span className="font-bold" style={{color:C.navy}}>PARA QUÉ</span> lideras.</p>
+            <button onClick={()=> setStep(4)} className="mt-6 bg-[#071D49] text-white font-black px-8 py-4 rounded-2xl">DESCUBRIR MI PARA QUÉ →</button>
+          </div>
+        )}
+
+        {step===4 && (
+          <div className="bg-white rounded-[28px] p-6 sm:p-10 shadow border border-slate-100 overflow-hidden relative">
+            <div className="absolute -right-10 -top-10 w-40 h-40 rounded-full bg-[#071D49]/5"/>
+            <div className="inline-flex items-center gap-2 bg-[#071D49] text-white px-3 py-1 rounded-full text-[11px] font-black tracking-widest">TU ARMA INICIAL</div>
+            <h2 className="font-black text-[30px] mt-3" style={{color:C.navy}}>LOS 5 PARA QUÉ</h2>
+            <p className="font-semibold mt-2" style={{color:C.azul}}>Las metas dicen qué quieres conseguir. El propósito responde para qué vale la pena conseguirlo.</p>
+            <p className="text-sm text-slate-600 mt-3">Vamos a hacerte una misma pregunta de diferentes maneras. No busques la respuesta perfecta. Responde lo primero que realmente tenga sentido para ti.</p>
+            <div className="mt-6 bg-[#F7F9FC] border border-slate-200 rounded-2xl p-4 flex gap-3 items-center">
+              <div className="w-10 h-10 rounded-full bg-[#D99A16] flex items-center justify-center text-white">🎯</div>
+              <div className="text-xs text-slate-600"><span className="font-bold">5 oportunidades</span> para pasar de lo operativo a lo que realmente te mueve como líder.</div>
+            </div>
+            <button onClick={()=> setStep(5)} className="mt-6 w-full bg-[#D99A16] text-white font-black py-4 rounded-2xl">ENCONTRAR MI PARA QUÉ →</button>
+          </div>
+        )}
+
+        {/* ParaQué 1-5 */}
+        {step>=5 && step<=9 && (
+          <div className="bg-white rounded-[28px] p-6 sm:p-8 shadow border border-slate-100">
+            <div className="flex justify-between items-center">
+              <div className="inline-flex items-center gap-2 text-[11px] font-black tracking-widest text-white px-3 py-1 rounded-full" style={{background:C.navy}}>LOS 5 PARA QUÉ</div>
+              <div className="text-xs font-black" style={{color:C.navy}}>{step-4} / 5</div>
+            </div>
+            {/* Raíces visual */}
+            <div className="mt-4 flex gap-2">
+              {['SUPERFICIE','RESULTADOS','EQUIPO','PERSONAS','PROPÓSITO','NÚCLEO'].map((l,i)=>{
+                const active = i <= (step-4)
+                return (
+                  <div key={l} className={`flex-1 h-2 rounded-full transition-all ${active?'':'opacity-20'}`} style={{background: active ? (i<2?C.azul : i<4?C.verde : C.dorado) : '#E2E8F0'}}/>
+                )
+              })}
+            </div>
+            <div className="mt-2 flex justify-between text-[9px] tracking-widest font-bold text-slate-400">
+              <span>SUPERFICIE</span><span>NÚCLEO</span>
+            </div>
+            <div className="mt-4 flex gap-3">
+              <div className="hidden sm:flex flex-col items-center gap-1">
+                <div className="w-[3px] flex-1 bg-slate-100 rounded-full overflow-hidden flex flex-col justify-end">
+                  <div className="transition-all duration-700" style={{height: `${(step-4)*20}%`, background: `linear-gradient(to bottom, ${C.azul}, ${C.verde})`}}/>
+                </div>
+                <div className="text-[10px]">🌳</div>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-black text-lg" style={{color:C.navy}}>{paraQs[step-5]}</h3>
+                <p className="text-xs text-slate-500 mt-1">No hay respuesta correcta. Profundiza, no impongas.</p>
+                <textarea
+                  value={step===5?answers.para1: step===6?answers.para2: step===7?answers.para3: step===8?answers.para4: answers.para5}
+                  onChange={e=>{
+                    const v=e.target.value
+                    if(step===5) setAnswers({...answers, para1:v})
+                    if(step===6) setAnswers({...answers, para2:v})
+                    if(step===7) setAnswers({...answers, para3:v})
+                    if(step===8) setAnswers({...answers, para4:v})
+                    if(step===9) setAnswers({...answers, para5:v})
+                  }}
+                  rows={3}
+                  placeholder={step===5?'Lidero a mi equipo para...':'...'}
+                  className="mt-3 w-full bg-[#F7F9FC] border border-slate-200 rounded-2xl p-4 text-sm outline-none focus:border-[#071D49] focus:ring-2 focus:ring-[#071D49]/10"
+                />
+                <div className={`text-[11px] mt-1 ${ (step===5?answers.para1: step===6?answers.para2: step===7?answers.para3: step===8?answers.para4:answers.para5).trim().length<8 ? 'text-red-500':'text-slate-400'}`}>
+                  {(step===5?answers.para1: step===6?answers.para2: step===7?answers.para3: step===8?answers.para4:answers.para5).length} caracteres • Mínimo 8
+                </div>
+                <div className="flex gap-3 mt-4">
+                  <button onClick={()=> setStep(s=> s-1)} className="px-6 py-3 rounded-xl border border-slate-200 font-bold text-sm">← Atrás</button>
+                  <button onClick={handleNext} disabled={!canNext} className={`flex-1 font-black text-sm px-6 py-3 rounded-xl ${canNext?'bg-[#071D49] text-white':'bg-slate-200 text-slate-400'}`}>{step===9?'Ver mi núcleo →':'Continuar →'}</button>
+                </div>
+                <div className="text-[11px] text-slate-400 text-center mt-2">Raíces creciendo • {step-4}/5</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {step===10 && (
+          <div className="bg-white rounded-[28px] p-8 text-center shadow border border-slate-100">
+            <div className="w-16 h-16 mx-auto rounded-full border-4 border-slate-100 border-t-[#071D49] animate-spin"/>
+            <h3 className="font-black mt-4" style={{color:C.navy}}>Analizando lo que hay detrás de tus respuestas…</h3>
+            <p className="text-sm text-slate-500 mt-1">Encontramos algo importante.</p>
+            <button onClick={()=> setStep(11)} className="mt-6 bg-[#071D49] text-white font-bold px-6 py-3 rounded-xl">Ver mi núcleo →</button>
+          </div>
+        )}
+
+        {step===11 && (
+          <div className="bg-white rounded-[28px] p-6 sm:p-8 shadow border border-slate-100">
+            <div className="text-[11px] tracking-widest font-black text-center" style={{color:C.dorado}}>TU NÚCLEO DE LIDERAZGO</div>
+            <div className="mt-4 bg-gradient-to-br from-[#071D49] to-[#1466B8] rounded-2xl p-6 text-white text-center relative overflow-hidden">
+              <div className="absolute -right-10 -top-10 w-32 h-32 bg-white/10 rounded-full"/>
+              <div className="text-lg font-black leading-tight">“{answers.purposeAI}”</div>
+              <div className="text-xs opacity-70 mt-2">Propuesta generada solo con tus ideas</div>
+            </div>
+            <p className="text-sm text-slate-600 text-center mt-4">¿Esto representa lo que quisiste decir?</p>
+            {!editingPurpose ? (
+              <div className="flex gap-3 mt-4">
+                <button onClick={()=> { setAnswers(a=> ({...a, purposeFinal: a.purposeAI})); setStep(12)} } className="flex-1 bg-[#178A3B] text-white font-black py-3 rounded-xl">SÍ, ME REPRESENTA</button>
+                <button onClick={()=> { setEditingPurpose(true); setTempPurpose(answers.purposeAI)}} className="flex-1 bg-white border border-slate-300 font-bold py-3 rounded-xl">QUIERO AJUSTARLO</button>
+              </div>
+            ) : (
+              <div className="mt-4">
+                <textarea value={tempPurpose} onChange={e=> setTempPurpose(e.target.value)} rows={3} className="w-full bg-[#F7F9FC] border border-slate-200 rounded-2xl p-4 text-sm outline-none focus:border-[#178A3B]"/>
+                <div className="flex gap-3 mt-3">
+                  <button onClick={()=> { setAnswers(a=> ({...a, purposeFinal: tempPurpose})); setEditingPurpose(false); setStep(12)}} className="flex-1 bg-[#071D49] text-white font-bold py-3 rounded-xl">Guardar</button>
+                  <button onClick={()=> setEditingPurpose(false)} className="flex-1 bg-white border border-slate-200 font-bold py-3 rounded-xl">Cancelar</button>
+                </div>
+              </div>
+            )}
+            <div className="text-[11px] text-slate-400 text-center mt-3">No inventamos motivaciones. Solo usamos lo que tú escribiste.</div>
+          </div>
+        )}
+
+        {step===12 && (
+          <div className="bg-white rounded-[28px] p-6 sm:p-8 shadow border border-slate-100 text-center">
+            <div className="inline-flex items-center gap-2 bg-[#F7F9FC] border border-slate-200 rounded-full px-3 py-1 text-[11px] font-black tracking-widest">YO → PROPÓSITO → ELLOS → NOSOTROS</div>
+            <h3 className="font-black text-xl mt-4" style={{color:C.navy}}>Ya encontraste tu PARA QUÉ.<br/>Ahora toca convertirlo en tu manera de liderar.</h3>
+            <p className="text-sm text-slate-600 mt-2">Tu propósito nace en <span className="font-bold" style={{color:C.azul}}>YO</span>, cobra vida en <span className="font-bold" style={{color:C.rojo}}>ELLOS</span> y se convierte en legado en <span className="font-bold" style={{color:C.verde}}>NOSOTROS</span>.</p>
+            <div className="mt-4 bg-[#071D49] rounded-2xl p-4 text-white">
+              <div className="text-xs opacity-70">TU PROPÓSITO</div>
+              <div className="font-bold text-sm mt-1">“{answers.purposeFinal}”</div>
+            </div>
+            <button onClick={()=> setStep(13)} className="mt-6 w-full bg-[#D99A16] text-white font-black py-3 rounded-xl">CONTINUAR MI JUGADA →</button>
+          </div>
+        )}
+
+        {step===13 && (
           <div className="bg-white rounded-[28px] p-6 sm:p-8 shadow-[0_12px_40px_rgba(7,29,73,0.06)] border border-slate-100">
             <PhaseHeader color={C.azul} label="NIVEL Y — YO" title="Hazlo visible: lo que dejas y lo que empiezas." />
+            <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs">Recuerda tu propósito: <span className="font-bold">“{answers.purposeFinal}”</span></div>
             <div className="grid sm:grid-cols-2 gap-4 mt-6">
               <div>
                 <label className="text-xs font-black tracking-widest" style={{color:C.azul}}>DEJAR DE:</label>
@@ -613,10 +899,10 @@ export default function App(){
                 <div className="text-[11px] text-slate-400 mt-1">{answers.q2_empezar.length} caracteres</div>
               </div>
             </div>
-            <NavButtons onBack={()=> setStep(2)} onNext={handleNext} canNext={canNext}/>
+            <NavButtons onBack={()=> setStep(12)} onNext={handleNext} canNext={canNext}/>
           </div>
         )}
-        {step===4 && (
+        {step===14 && (
           <QuestionCard
             phase="YO" color={C.azul} stepLabel="NIVEL Y — YO" title="¿Por qué te cuesta soltar?"
             question="¿Por qué crees que al líder le cuesta dejar de resolver personalmente los problemas?"
@@ -626,8 +912,7 @@ export default function App(){
           />
         )}
 
-        {/* ELLOS */}
-        {step===5 && (
+        {step===15 && (
           <div className="space-y-4">
             <div className="bg-[#D71920] rounded-2xl p-4 text-white flex gap-4 items-center">
               <div className="w-12 h-12 rounded-full bg-white flex items-center justify-center text-xl">👤</div>
@@ -636,6 +921,7 @@ export default function App(){
                 <div className="text-xs opacity-90">Capacidad técnica alta. Participa poco. Espera instrucciones. Cumple pero no propone.</div>
               </div>
             </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs">Recuerda tu propósito: <span className="font-bold">“{answers.purposeFinal}”</span> • ¿Esta conversación te acerca a ese propósito?</div>
             <QuestionCard
               phase="ELLOS" color={C.rojo} stepLabel="NIVEL E — ELLOS" title="Ahora deja de mirar el problema desde tu mundo."
               question="Antes de juzgar a Alex: ¿Qué intentarías comprender de él?"
@@ -645,7 +931,7 @@ export default function App(){
             />
           </div>
         )}
-        {step===6 && (
+        {step===16 && (
           <QuestionCard
             phase="ELLOS" color={C.rojo} stepLabel="NIVEL E — ELLOS" title="Lo que bloquea no siempre es lo que parece."
             question="¿Qué podría estar bloqueando su participación?"
@@ -654,7 +940,7 @@ export default function App(){
             onNext={handleNext} canNext={canNext} progress={`${currentQIndex}/${totalQuestions}`}
           />
         )}
-        {step===7 && (
+        {step===17 && (
           <QuestionCard
             phase="ELLOS" color={C.rojo} stepLabel="NIVEL E — ELLOS" title="Conversación que abre, no que cierra."
             question='Escribe cómo iniciarías una conversación con Alex. "Líder:"'
@@ -663,7 +949,7 @@ export default function App(){
             onNext={handleNext} canNext={canNext} progress={`${currentQIndex}/${totalQuestions}`}
           />
         )}
-        {step===8 && (
+        {step===18 && (
           <div className="bg-white rounded-[28px] p-6 sm:p-8 shadow border border-slate-100">
             <div className="bg-gradient-to-r from-[#071D49] to-[#1466B8] rounded-2xl p-5 text-white text-center">
               <div className="text-[11px] tracking-widest opacity-70">RECUERDA EL EFECTO LUIS MIGUEL</div>
@@ -671,25 +957,29 @@ export default function App(){
               <div className="font-bold" style={{color: C.dorado}}>Tienes que motivar a partir de SU mundo.”</div>
             </div>
             <PhaseHeader color={C.rojo} label="ELLOS — MOTIVACIÓN" title="Entra en su mundo." />
+            <div className="mt-2 bg-amber-50 border border-amber-200 rounded-xl p-2 text-xs">Tu propósito: <span className="font-bold">“{answers.purposeFinal}”</span></div>
             <div className="mt-6">
               <label className="font-bold text-slate-800">¿Qué pregunta le harías a Alex para conocer mejor qué lo motiva?</label>
               <textarea value={answers.q6b} onChange={e=> setAnswers({...answers, q6b:e.target.value})} rows={3} placeholder="Ej. ¿Qué parte de tu trabajo disfrutas más y qué te gustaría hacer más?" className="mt-3 w-full bg-[#F7F9FC] border border-slate-200 rounded-2xl p-4 text-sm outline-none focus:border-[#D71920] focus:ring-2 focus:ring-[#D71920]/10"/>
               <div className="text-xs text-slate-500 mt-2">Tip: una gran pregunta contiene “qué” + “te” + verbo.</div>
             </div>
-            <NavButtons onBack={()=> setStep(7)} onNext={handleNext} canNext={canNext}/>
+            <NavButtons onBack={()=> setStep(17)} onNext={handleNext} canNext={canNext}/>
           </div>
         )}
 
-        {step===9 && (
-          <QuestionCard
-            phase="NOSOTROS" color={C.verde} stepLabel="NIVEL N — NOSOTROS" title="El objetivo ya no es que tú tengas la respuesta. Es que el equipo pueda construirla."
-            question='Completa: "A partir de ahora, nosotros..."'
-            hint='Crea una regla de equipo observable. Ej. "...antes de escalar un problema llegaremos con al menos una propuesta."'
-            value={answers.q7} onChange={v=> setAnswers({...answers, q7:v})} placeholder="A partir de ahora, nosotros... antes de pedir decisión, traeremos opciones con pros y contras."
-            onNext={handleNext} canNext={canNext} progress={`${currentQIndex}/${totalQuestions}`}
-          />
+        {step===19 && (
+          <div className="space-y-3">
+            <div className="bg-[#F7F9FC] border border-slate-200 rounded-xl p-3 text-xs">Para que tu propósito <span className="font-bold">“{answers.purposeFinal}”</span> no dependa solo de ti…</div>
+            <QuestionCard
+              phase="NOSOTROS" color={C.verde} stepLabel="NIVEL N — NOSOTROS" title="El objetivo ya no es que tú tengas la respuesta. Es que el equipo pueda construirla."
+              question='Completa: "A partir de ahora, nosotros..."'
+              hint='Crea una regla de equipo observable. Ej. "...antes de escalar un problema llegaremos con al menos una propuesta."'
+              value={answers.q7} onChange={v=> setAnswers({...answers, q7:v})} placeholder="A partir de ahora, nosotros... antes de pedir decisión, traeremos opciones con pros y contras."
+              onNext={handleNext} canNext={canNext} progress={`${currentQIndex}/${totalQuestions}`}
+            />
+          </div>
         )}
-        {step===10 && (
+        {step===20 && (
           <QuestionCard
             phase="NOSOTROS" color={C.verde} stepLabel="NIVEL N — NOSOTROS" title="Las reglas no viven en carteles. Viven en comportamientos."
             question="¿Qué debería hacer el líder para que esa regla realmente se convierta en una forma de trabajar?"
@@ -698,7 +988,7 @@ export default function App(){
             onNext={handleNext} canNext={canNext} progress={`${currentQIndex}/${totalQuestions}`}
           />
         )}
-        {step===11 && (
+        {step===21 && (
           <div className="bg-white rounded-[28px] p-6 sm:p-8 shadow border border-slate-100">
             <PhaseHeader color={C.verde} label="NIVEL N — NOSOTROS" title="El valor que sostiene la jugada." />
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-6">
@@ -714,10 +1004,10 @@ export default function App(){
               <label className="font-bold text-sm text-slate-800">¿Por qué?</label>
               <textarea value={answers.q9_porQue} onChange={e=> setAnswers({...answers, q9_porQue:e.target.value})} rows={3} placeholder="Explica por qué ese valor es clave para tu equipo ahora..." className="mt-2 w-full bg-[#F7F9FC] border border-slate-200 rounded-2xl p-4 text-sm outline-none focus:border-[#178A3B] focus:ring-2 focus:ring-[#178A3B]/10"/>
             </div>
-            <NavButtons onBack={()=> setStep(10)} onNext={handleNext} canNext={canNext}/>
+            <NavButtons onBack={()=> setStep(20)} onNext={handleNext} canNext={canNext}/>
           </div>
         )}
-        {step===12 && (
+        {step===22 && (
           <QuestionCard
             phase="NOSOTROS" color={C.verde} stepLabel="MACRO-OBJETIVO" title="¿Cuál es el verdadero objetivo?"
             question="¿Cuál debería ser el verdadero objetivo del líder con este equipo?"
@@ -726,10 +1016,11 @@ export default function App(){
             onNext={handleNext} canNext={canNext} progress={`${currentQIndex}/${totalQuestions}`}
           />
         )}
-        {step===13 && (
+        {step===23 && (
           <div className="bg-white rounded-[28px] p-6 sm:p-8 shadow border border-slate-100">
             <PhaseHeader color={C.dorado} label="LA JUGADA — ACCIÓN" title="Convierte la reflexión en comportamiento." />
             <p className="text-sm text-slate-600 mt-2">Define tu jugada con 4 elementos obligatorios: <span className="font-bold">ACCIÓN + PERSONA + MOMENTO + EVIDENCIA</span></p>
+            <div className="mt-2 bg-[#071D49] rounded-xl p-3 text-white text-xs">Viviendo tu propósito: <span className="font-bold" style={{color:C.dorado}}>“{answers.purposeFinal}”</span> — ¿Qué vas a hacer esta semana para vivirlo?</div>
             <div className="space-y-4 mt-6">
               <div>
                 <label className="text-xs font-black tracking-widest" style={{color:C.navy}}>ESTA SEMANA VOY A...</label>
@@ -750,11 +1041,10 @@ export default function App(){
                 <input value={answers.q11_evidencia} onChange={e=> setAnswers({...answers, q11_evidencia:e.target.value})} placeholder="Ej. Tendré 3 propuestas escritas en el pizarrón antes de decidir" className="mt-2 w-full bg-[#F7F9FC] border border-slate-200 rounded-2xl p-4 text-sm outline-none focus:border-[#D99A16]"/>
               </div>
             </div>
-            <NavButtons onBack={()=> setStep(12)} onNext={handleNext} canNext={canNext} nextLabel="VER MI DIAGNÓSTICO →"/>
+            <NavButtons onBack={()=> setStep(22)} onNext={handleNext} canNext={canNext} nextLabel="VER MI DIAGNÓSTICO →"/>
           </div>
         )}
 
-        {/* CALCULATING */}
         {calculating && (
           <div className="bg-white rounded-[28px] p-8 sm:p-12 shadow border border-slate-100 text-center">
             <div className="w-16 h-16 mx-auto rounded-full border-4 border-slate-100 border-t-[#071D49] animate-spin"/>
@@ -771,10 +1061,8 @@ export default function App(){
           </div>
         )}
 
-        {/* RESULTADOS */}
-        {step===14 && assessment && (
+        {step===24 && assessment && (
           <div className="space-y-6 pb-10">
-            {/* Marcador */}
             <div className="bg-white rounded-[28px] p-6 sm:p-8 shadow border border-slate-100 overflow-hidden relative">
               <div className="absolute top-0 left-0 right-0 h-1" style={{background:`linear-gradient(90deg, ${C.azul}, ${C.rojo}, ${C.verde}, ${C.dorado})`}}/>
               <div className="text-center">
@@ -803,7 +1091,6 @@ export default function App(){
               </div>
             </div>
 
-            {/* Gráfica */}
             <div className="bg-white rounded-[28px] p-6 shadow border border-slate-100">
               <h3 className="font-black" style={{color:C.navy}}>Tu gráfica Y.E.N.</h3>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-4">
@@ -826,13 +1113,19 @@ export default function App(){
                   </div>
                 ))}
               </div>
-              {/* radar simple */}
               <div className="mt-6 flex justify-center">
                 <Radar scores={assessment.scores}/>
               </div>
             </div>
 
-            {/* Diagnóstico */}
+            {/* MI PARA QUÉ */}
+            <div className="bg-gradient-to-br from-[#071D49] to-[#1466B8] rounded-[28px] p-6 sm:p-8 text-white relative overflow-hidden">
+              <div className="absolute -right-10 -top-10 w-40 h-40 bg-white/10 rounded-full"/>
+              <div className="text-[11px] tracking-[0.2em] font-black opacity-70">MI PARA QUÉ</div>
+              <div className="font-black text-xl mt-2 leading-tight">“{assessment.purpose}”</div>
+              <div className="text-xs opacity-70 mt-2">Tu núcleo de liderazgo — descubierto a través de los 5 Para Qué</div>
+            </div>
+
             <div className="bg-[#071D49] rounded-[28px] p-6 sm:p-8 text-white relative overflow-hidden">
               <div className="absolute -right-10 -bottom-10 w-48 h-48 rounded-full bg-white/5"/>
               <div className="text-[11px] tracking-widest opacity-60 font-black">INTERPRETACIÓN PERSONALIZADA</div>
@@ -840,7 +1133,6 @@ export default function App(){
               {answers.nombre && <div className="mt-4 text-xs opacity-70">— Para {answers.anonimo ? 'participante anónimo' : answers.nombre}</div>}
             </div>
 
-            {/* Fortalezas */}
             <div className="bg-white rounded-[28px] p-6 shadow border border-slate-100">
               <h3 className="font-black flex items-center gap-2" style={{color:C.verde}}><span className="w-8 h-8 rounded-full bg-[#178A3B] text-white flex items-center justify-center">✓</span> LO QUE YA ESTÁS HACIENDO BIEN</h3>
               <div className="grid sm:grid-cols-3 gap-3 mt-4">
@@ -854,7 +1146,6 @@ export default function App(){
               </div>
             </div>
 
-            {/* Alertas */}
             <div className="bg-white rounded-[28px] p-6 shadow border border-slate-100">
               <h3 className="font-black flex items-center gap-2" style={{color:C.rojo}}><span className="w-8 h-8 rounded-full bg-[#D71920] text-white flex items-center justify-center">!</span> CUIDADO CON ESTAS JUGADAS</h3>
               <div className="grid sm:grid-cols-3 gap-3 mt-4">
@@ -867,7 +1158,6 @@ export default function App(){
               </div>
             </div>
 
-            {/* Deja de / Empieza a */}
             <div className="grid sm:grid-cols-2 gap-4">
               <div className="bg-white rounded-[28px] p-6 border border-slate-100 shadow">
                 <h4 className="font-black text-sm flex items-center gap-2" style={{color:C.rojo}}><span className="w-6 h-6 rounded-full bg-red-100 flex items-center justify-center">✕</span> DEJA DE</h4>
@@ -891,7 +1181,30 @@ export default function App(){
               </div>
             </div>
 
-            {/* Evolución */}
+            {/* DE TU PARA QUÉ A TU LEGADO */}
+            <div className="bg-white rounded-[28px] p-6 sm:p-8 shadow border border-slate-100">
+              <h3 className="font-black text-center" style={{color:C.navy}}>DE TU PARA QUÉ A TU LEGADO</h3>
+              <div className="mt-6 grid sm:grid-cols-4 gap-3 text-center">
+                <div className="bg-[#F7F9FC] border border-slate-200 rounded-2xl p-4">
+                  <div className="text-[11px] font-black tracking-widest" style={{color:C.azul}}>MI PARA QUÉ</div>
+                  <div className="text-xs font-bold mt-2">“{assessment.purpose}”</div>
+                </div>
+                <div className="bg-[#F7F9FC] border border-slate-200 rounded-2xl p-4">
+                  <div className="text-[11px] font-black tracking-widest" style={{color:C.rojo}}>MI COMPORTAMIENTO</div>
+                  <div className="text-xs font-bold mt-2">{answers.q2_empezar.slice(0,60) || 'Preguntar antes de resolver'}</div>
+                </div>
+                <div className="bg-[#F7F9FC] border border-slate-200 rounded-2xl p-4">
+                  <div className="text-[11px] font-black tracking-widest" style={{color:C.verde}}>MI EQUIPO</div>
+                  <div className="text-xs font-bold mt-2">Personas capaces de tomar decisiones</div>
+                </div>
+                <div className="bg-[#071D49] rounded-2xl p-4 text-white">
+                  <div className="text-[11px] font-black tracking-widest" style={{color:C.dorado}}>MI LEGADO</div>
+                  <div className="text-xs font-bold mt-2">Un equipo que sigue creciendo aunque tú ya no estés</div>
+                </div>
+              </div>
+              <div className="hidden sm:flex justify-center items-center gap-2 mt-3 text-slate-300 text-xs">↓ &nbsp; ↓ &nbsp; ↓ &nbsp; ↓</div>
+            </div>
+
             <div className="bg-white rounded-[28px] p-6 sm:p-8 shadow border border-slate-100">
               <h3 className="font-black text-center" style={{color:C.navy}}>TU EVOLUCIÓN COMO LÍDER</h3>
               <p className="text-center text-xs text-slate-500 mt-1">De la dependencia a la autonomía</p>
@@ -923,7 +1236,6 @@ export default function App(){
               </div>
             </div>
 
-            {/* Siguiente nivel */}
             <div className="bg-white rounded-[28px] p-6 shadow border border-slate-100 flex flex-col sm:flex-row gap-6 items-center">
               <div className="flex-1">
                 <div className="text-[11px] tracking-widest font-black text-slate-500">TU SIGUIENTE NIVEL</div>
@@ -937,7 +1249,6 @@ export default function App(){
               <div className="w-full sm:w-40 h-24 bg-gradient-to-br from-[#071D49] to-[#1466B8] rounded-2xl flex items-center justify-center text-white font-black text-center p-3">YO → ELLOS → NOSOTROS</div>
             </div>
 
-            {/* Reto 7 días */}
             <div className="bg-gradient-to-br from-[#D99A16] to-[#c78d13] rounded-[28px] p-6 sm:p-8 text-white relative overflow-hidden">
               <div className="absolute -right-12 -top-12 w-40 h-40 bg-white/10 rounded-full"/>
               <div className="text-[11px] tracking-widest font-black opacity-80">TU RETO DE ESTA SEMANA</div>
@@ -953,24 +1264,25 @@ export default function App(){
               </div>
             </div>
 
-            {/* Playbook */}
             <div className="bg-white rounded-[28px] p-6 sm:p-8 shadow border border-slate-100">
               <h3 className="font-black flex items-center gap-2" style={{color:C.navy}}><span className="w-8 h-8 rounded-full bg-[#071D49] text-white flex items-center justify-center">📖</span> MI PLAYBOOK DE LIDERAZGO</h3>
               <div className="grid sm:grid-cols-2 gap-4 mt-6">
+                <PlayCard title="MI NÚCLEO" subtitle="Para qué lidero" text={assessment.playbook.nucleo} color={C.navy}/>
                 <PlayCard title="YO" subtitle="Lo que debo trabajar en mí" text={assessment.playbook.yo} color={C.azul}/>
                 <PlayCard title="ELLOS" subtitle="Cómo conversar" text={assessment.playbook.ellos} color={C.rojo}/>
                 <PlayCard title="NOSOTROS" subtitle="Qué construir con el equipo" text={assessment.playbook.nosotros} color={C.verde}/>
-                <PlayCard title="MI JUGADA" subtitle="Próximos 7 días" text={assessment.playbook.jugada} color={C.dorado}/>
+                <div className="sm:col-span-2">
+                  <PlayCard title="MI JUGADA" subtitle="Próximos 7 días" text={assessment.playbook.jugada} color={C.dorado}/>
+                </div>
               </div>
               <div className="flex flex-col sm:flex-row gap-3 mt-6">
                 <button onClick={()=> downloadPDF(assessment, answers)} className="flex-1 bg-[#071D49] hover:bg-[#0a2a6b] text-white font-black py-3 rounded-xl shadow">📄 DESCARGAR PDF COMPLETO</button>
                 <button onClick={()=> window.print()} className="flex-1 bg-white border border-slate-300 font-bold py-3 rounded-xl">Imprimir</button>
                 <button onClick={()=> {navigator.clipboard.writeText(window.location.href); alert('Link copiado')}} className="flex-1 bg-white border border-slate-300 font-bold py-3 rounded-xl">Compartir</button>
               </div>
-              <div className="text-[11px] text-slate-400 text-center mt-2">Se descarga un documento A4 con todo tu diagnóstico, playbook y reto de 7 días.</div>
+              <div className="text-[11px] text-slate-400 text-center mt-2">Se descarga un documento A4 con todo tu diagnóstico, playbook, propósito y reto de 7 días.</div>
             </div>
 
-            {/* Frase final */}
             <div className="bg-[#071D49] rounded-[28px] p-8 text-center text-white relative overflow-hidden">
               <div className="absolute inset-0 opacity-10" style={{background:`radial-gradient(circle at 50% 0%, ${C.dorado}, transparent 60%)`}}/>
               <div className="relative">
@@ -978,7 +1290,7 @@ export default function App(){
                 <div className="font-black text-xl sm:text-2xl mt-3 leading-tight">“{assessment.frase_final}”</div>
                 <div className="mt-6 font-bold tracking-[0.2em] text-sm" style={{color:C.dorado}}>LA VIDA ES UN DEPORTE DE EQUIPO.</div>
                 <div className="mt-2 text-xs opacity-60">No se trata de que el equipo necesite menos liderazgo. Se trata de construir un liderazgo que haga al equipo cada vez más capaz.</div>
-                <button onClick={()=> {setStep(0); setAssessment(null); setAnswers({q1:'',q2_dejar:'',q2_empezar:'',q3:'',q4:'',q5:'',q6:'',q6b:'',q7:'',q8:'',q9_valor:'',q9_porQue:'',q10:'',q11_accion:'',q11_quien:'',q11_cuando:'',q11_evidencia:'', nombre:'', anonimo:false})}} className="mt-6 bg-white text-[#071D49] font-black px-6 py-3 rounded-xl">Repetir experiencia</button>
+                <button onClick={()=> {setStep(0); setAssessment(null); setAnswers({q1:'',q2_dejar:'',q2_empezar:'',q3:'',q4:'',q5:'',q6:'',q6b:'',q7:'',q8:'',q9_valor:'',q9_porQue:'',q10:'',q11_accion:'',q11_quien:'',q11_cuando:'',q11_evidencia:'', nombre:'', anonimo:false, para1:'',para2:'',para3:'',para4:'',para5:'', purposeAI:'', purposeFinal:''}); setParaQs(['¿Para qué lideras a tu equipo?','','','',''])}} className="mt-6 bg-white text-[#071D49] font-black px-6 py-3 rounded-xl">Repetir experiencia</button>
               </div>
             </div>
 
@@ -987,8 +1299,7 @@ export default function App(){
         )}
       </main>
 
-      {/* sticky nav helper */}
-      {(step>=2 && step<=13) && !calculating && (
+      {(step>=2 && step<=23) && !calculating && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-white border border-slate-200 shadow-xl rounded-full px-4 py-2 flex items-center gap-3 text-xs font-bold">
           <span className="hidden sm:inline text-slate-500">{currentQIndex} / {totalQuestions}</span>
           <div className="w-24 h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-[#071D49] transition-all" style={{width:`${(currentQIndex/totalQuestions)*100}%`}}/></div>
@@ -1007,27 +1318,27 @@ function PhaseHeader({color, label, title}:{color:string, label:string, title:st
     </div>
   )
 }
-function QuestionCard({phase, color, stepLabel, title, question, hint, value, onChange, placeholder, onNext, canNext, progress}:{phase:string, color:string, stepLabel:string, title:string, question:string, hint:string, value:string, onChange:(v:string)=>void, placeholder:string, onNext:()=>void, canNext:boolean, progress:string}){
+function QuestionCard({phase:_phase, color, stepLabel, title, question, hint, value, onChange, placeholder, onNext, canNext, progress}:{phase:string, color:string, stepLabel:string, title:string, question:string, hint:string, value:string, onChange:(v:string)=>void, placeholder:string, onNext:()=>void, canNext:boolean, progress:string}){
   return (
     <div className="bg-white rounded-[28px] p-6 sm:p-8 shadow-[0_12px_40px_rgba(7,29,73,0.06)] border border-slate-100">
       <PhaseHeader color={color} label={stepLabel} title={title}/>
       <div className="mt-6">
         <label className="font-bold text-slate-800">{question}</label>
         {hint && <div className="text-xs text-slate-500 mt-1">{hint}</div>}
-        <textarea value={value} onChange={e=> onChange(e.target.value)} rows={4} placeholder={placeholder} className="mt-3 w-full bg-[#F7F9FC] border border-slate-200 rounded-2xl p-4 text-sm outline-none focus:ring-2 focus:border-transparent" style={{focusedBorder: color} as any}/>
+        <textarea value={value} onChange={e=> onChange(e.target.value)} rows={4} placeholder={placeholder} className="mt-3 w-full bg-[#F7F9FC] border border-slate-200 rounded-2xl p-4 text-sm outline-none focus:ring-2 focus:border-transparent"/>
         <div className="flex justify-between mt-2">
           <span className={`text-[11px] ${value.length<10?'text-red-500':'text-slate-400'}`}>{value.length <10 ? `Mínimo 10 caracteres (${value.length}/10)` : `${value.length} caracteres`}</span>
           <span className="text-[11px] text-slate-400">{progress}</span>
         </div>
       </div>
-      <NavButtons onBack={undefined} onNext={onNext} canNext={canNext} hideBack={phase==='YO' && progress==='1/13' ? false : undefined}/>
+      <NavButtons onBack={undefined} onNext={onNext} canNext={canNext}/>
     </div>
   )
 }
-function NavButtons({onBack, onNext, canNext, nextLabel, hideBack}:{onBack?:()=>void, onNext:()=>void, canNext:boolean, nextLabel?:string, hideBack?:boolean}){
+function NavButtons({onBack, onNext, canNext, nextLabel}:{onBack?:()=>void, onNext:()=>void, canNext:boolean, nextLabel?:string}){
   return (
     <div className="flex gap-3 mt-6">
-      {onBack && !hideBack && <button onClick={onBack} className="px-6 py-3 rounded-xl border border-slate-200 bg-white font-bold text-sm">← Atrás</button>}
+      {onBack && <button onClick={onBack} className="px-6 py-3 rounded-xl border border-slate-200 bg-white font-bold text-sm">← Atrás</button>}
       <button onClick={onNext} disabled={!canNext} className={`flex-1 font-black tracking-widest text-sm px-6 py-3 rounded-xl transition ${canNext? 'bg-[#071D49] text-white hover:bg-[#0a2a6b] shadow' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>{nextLabel || 'Continuar →'}</button>
     </div>
   )
