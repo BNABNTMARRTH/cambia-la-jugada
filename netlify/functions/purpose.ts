@@ -28,8 +28,9 @@ export const handler: Handler = async (event) => {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'Se requieren al menos 2 respuestas' }) }
     }
 
-    const apiKey = process.env.OPENAI_API_KEY || process.env.AI_API_KEY || process.env.VITE_AI_API_KEY
-    const model = process.env.AI_MODEL || 'gpt-4o-mini'
+    const apiKey = process.env.NVIDIA_API_KEY || process.env.OPENAI_API_KEY || process.env.AI_API_KEY || process.env.VITE_AI_API_KEY
+    const model = process.env.AI_MODEL || 'mistralai/mistral-nemotron'
+    const apiUrl = process.env.AI_API_URL || process.env.OPENAI_API_URL || 'https://integrate.api.nvidia.com/v1/chat/completions'
 
     // Fallback heurístico si no hay API key - con corrección gramatical básica
     function fallbackPurpose(ans: string[]){
@@ -54,23 +55,26 @@ export const handler: Handler = async (event) => {
 
 Genera el propósito sintetizado. Recuerda: solo usa ideas presentes, corrige gramática, una sola frase que empiece con "Lidero para...".`
 
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+    const controller = new AbortController()
+    const t = setTimeout(()=> controller.abort(), 12000)
+    const resp = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
+      signal: controller.signal,
       body: JSON.stringify({
         model,
         temperature: 0.7,
         max_tokens: 120,
-        response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: SYSTEM_PURPOSE },
           { role: 'user', content: userPrompt },
         ],
       }),
     })
+    clearTimeout(t)
 
     if (!resp.ok) {
       const err = await resp.text()

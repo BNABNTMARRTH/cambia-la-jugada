@@ -27,26 +27,30 @@ export const handler: Handler = async (event) => {
 
   try {
     const { prevAnswer, depth, history } = JSON.parse(event.body || '{}')
-    const apiKey = process.env.OPENAI_API_KEY || process.env.AI_API_KEY
+    const apiKey = process.env.NVIDIA_API_KEY || process.env.OPENAI_API_KEY || process.env.AI_API_KEY
+    const apiUrl = process.env.AI_API_URL || 'https://integrate.api.nvidia.com/v1/chat/completions'
     if (!apiKey) {
       return { statusCode: 200, headers, body: JSON.stringify({ question: null, fallback: true }) }
     }
     const prompt = `Historial: ${JSON.stringify(history || [])}\nRespuesta actual: "${prevAnswer}"\nProfundidad actual: ${depth}/5\nGenera la siguiente pregunta para profundizar.`
 
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+    const controller = new AbortController()
+    const to = setTimeout(()=> controller.abort(), 10000)
+    const resp = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      signal: controller.signal,
       body: JSON.stringify({
-        model: process.env.AI_MODEL || 'gpt-4o-mini',
+        model: process.env.AI_MODEL || 'meta/llama-3.2-11b-vision-instruct',
         temperature: 0.8,
         max_tokens: 80,
-        response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: SYSTEM_PARA },
           { role: 'user', content: prompt },
         ],
       }),
     })
+    clearTimeout(to)
     if (!resp.ok) {
       const t = await resp.text()
       return { statusCode: 200, headers, body: JSON.stringify({ question: null, fallback: true, error: t.slice(0,200) }) }
