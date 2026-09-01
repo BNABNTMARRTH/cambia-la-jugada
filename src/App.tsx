@@ -121,11 +121,11 @@ function generateParaQuestion(prev:string, idx:number){
   if((coreLower.includes('ayudar') || coreLower.includes('apoyar')) && prev.trim().length<30){
     return '¿A quién quieres ayudar y qué quisieras que cambie para esa persona?'
   }
-  // repetitive will be handled by caller, but fallback
+  // repetitive will be handled by caller, but fallback - evitando "que + infinitivo" (ej. "que evitar" es incorrecto)
   const templates:string[]=[
     `Dijiste que quieres "${core}". ¿Para qué es importante para ti que eso suceda?`,
-    `¿Y para qué es importante para ti que ${core}?`,
-    `¿Para qué quieres que ${core}?`,
+    `¿Y para qué es importante para ti "${core}"?`,
+    `¿Qué cambiaría si logras "${core}"?`,
     `¿Qué hace que eso sea realmente importante para ti?`,
     `Si consiguieras eso durante los próximos años, ¿qué te gustaría que esas personas recordaran de tu liderazgo?`
   ]
