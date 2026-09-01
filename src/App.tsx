@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react'
-import jsPDF from 'jspdf'
 
 // Palette
 const C = {
@@ -109,20 +108,6 @@ function isRepetitive(a:string,b:string){
   const wb = new Set(bl.split(/\s+/).filter(w=>w.length>3))
   let inter=0; wa.forEach(w=>{ if(wb.has(w)) inter++ })
   return inter>=2 && Math.abs(al.length-bl.length)<25
-}
-function isQuestionRepetitive(newQ:string, prevQ:string, newCore:string){
-  if(!newQ || !prevQ) return false
-  const nq = newQ.toLowerCase(), pq = prevQ.toLowerCase(), core = newCore.toLowerCase().replace(/^(que\s+)?/,'').slice(0,12)
-  if(nq === pq) return true
-  // si la nueva pregunta contiene el core viejo y no el nuevo, es repetitiva
-  const prevCore = extractCore(prevQ).toLowerCase().slice(0,12)
-  // cuenta palabras comunes
-  const nWords = new Set(nq.split(/\W+/).filter(w=>w.length>4))
-  const pWords = new Set(pq.split(/\W+/).filter(w=>w.length>4))
-  let common=0; nWords.forEach(w=>{ if(pWords.has(w)) common++ })
-  if(common>=3) return true
-  if(core && !nq.includes(core.slice(0,8)) && nq.includes(prevCore.slice(0,8))) return true
-  return false
 }
 function generateParaQuestion(prev:string, idx:number){
   const core = extractCore(prev)
@@ -352,7 +337,8 @@ function evaluate(answers: Answers): Assessment {
   }
 }
 
-function downloadPDF(assessment: Assessment, answers: Answers){
+async function downloadPDF(assessment: Assessment, answers: Answers){
+  const { default: jsPDF } = await import('jspdf')
   const doc = new jsPDF({unit:'mm', format:'a4'})
   const pageW = 210
   const margin = 14
@@ -571,19 +557,10 @@ export default function App(){
       setShowConcrete(true)
       return
     }
-    // Para Qué logic - IA con anti-repetición
+    // Para Qué logic - solo heurística (rápido, sin IA) para evitar repetición y lentitud
     if(step===5){
       const nextQ = generateParaQuestion(answers.para1, 1)
       setParaQs(p=>{ const n=[...p]; n[1]=nextQ; return n })
-      try{
-        const r = await fetch('/api/para-question', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({prevAnswer: answers.para1, depth:1, history:[answers.para1]})})
-        if(r.ok){ const d=await r.json(); if(d.question){
-          const core = extractCore(answers.para1).slice(0,10).toLowerCase()
-          if(core && d.question.toLowerCase().includes(core.slice(0,6))){
-            setParaQs(p=>{const n=[...p]; n[1]=d.question; return n})
-          }
-        }}
-      }catch{}
     }
     if(step===6){
       if(isRepetitive(answers.para2, answers.para1)){
@@ -594,19 +571,6 @@ export default function App(){
       } else {
         const nextQ = generateParaQuestion(answers.para2, 2)
         setParaQs(p=>{ const n=[...p]; n[2]=nextQ; return n })
-        try{
-          const r = await fetch('/api/para-question', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({prevAnswer: answers.para2, depth:2, history:[answers.para1, answers.para2]})})
-          if(r.ok){
-            const d=await r.json()
-            if(d.question){
-              const heuristic = nextQ
-              // si la IA repite la pregunta anterior, ignorarla y mantener heurística
-              if(!isQuestionRepetitive(d.question, heuristic, extractCore(answers.para2))){
-                setParaQs(p=>{const n=[...p]; n[2]=d.question; return n})
-              }
-            }
-          }
-        }catch{}
       }
     }
     if(step===7){
@@ -616,28 +580,10 @@ export default function App(){
       }
       const nextQ = generateParaQuestion(answers.para3, 3)
       setParaQs(p=>{ const n=[...p]; n[3]=nextQ; return n })
-      try{
-        const r = await fetch('/api/para-question', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({prevAnswer: answers.para3, depth:3, history:[answers.para1, answers.para2, answers.para3]})})
-        if(r.ok){
-          const d=await r.json()
-          if(d.question && !isQuestionRepetitive(d.question, nextQ, extractCore(answers.para3))){
-            setParaQs(p=>{const n=[...p]; n[3]=d.question; return n})
-          }
-        }
-      }catch{}
     }
     if(step===8){
       const nextQ = generateParaQuestion(answers.para4, 4)
       setParaQs(p=>{ const n=[...p]; n[4]=nextQ; return n })
-      try{
-        const r = await fetch('/api/para-question', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({prevAnswer: answers.para4, depth:4, history:[answers.para1, answers.para2, answers.para3, answers.para4]})})
-        if(r.ok){
-          const d=await r.json()
-          if(d.question && !isQuestionRepetitive(d.question, nextQ, extractCore(answers.para4))){
-            setParaQs(p=>{const n=[...p]; n[4]=d.question; return n})
-          }
-        }
-      }catch{}
     }
     if(step===9){
       // IA para propósito - con fallback heurístico
