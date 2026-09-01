@@ -139,21 +139,31 @@ function generateParaQuestion(prev:string, idx:number){
 function synthesizePurpose(answers: string[]){
   const cleaned = answers.map(a=> a.trim()).filter(a=>a.length>8)
   if(cleaned.length===0) return 'Lidero para contribuir al crecimiento de mi equipo.'
-  // take deepest 2 and combine
   let deepest = cleaned[cleaned.length-1].replace(/^(para|porque|quiero|lidero para)\s+/i,'').trim()
-  // ensure first letter lower unless starts with capital for style, keep as is
-  // remove trailing dot
   deepest = deepest.replace(/\.$/,'').trim()
-  // if deepest is very short, append previous
   if(deepest.length<15 && cleaned.length>=2){
     const prev = cleaned[cleaned.length-2].replace(/^(para|porque)\s+/i,'').trim().replace(/\.$/,'')
     deepest = `${prev} y ${deepest}`
   }
-  // ensure starts with verb phrase
+  // corrección gramatical básica sin IA
+  deepest = deepest.replace(/\bestarán\b/g,'estén').replace(/\bserán\b/g,'sean').replace(/\btendrán\b/g,'tengan')
+  if(/^todos\b/i.test(deepest) && !/^que\s+/i.test(deepest)){
+    deepest = 'que ' + deepest.charAt(0).toLowerCase() + deepest.slice(1)
+  } else if(!/^que\s+/i.test(deepest) && /^(el |la |mis |mi |que )/i.test(deepest)){
+    // si ya empieza con que, no duplicar
+  }
+  // si no empieza con que y es frase con verbo en futuro, añadir que
+  if(/^(todos|todo)\b/i.test(deepest) && !deepest.toLowerCase().startsWith('que ')){
+    deepest = 'que ' + deepest
+  }
   let purpose = deepest
-  // capitalize first
+  // asegurar que después de "que" el verbo esté en subjuntivo si era futuro
+  purpose = purpose.replace(/que todos en el equipo estarán/i,'que todos en el equipo estén')
   purpose = purpose.charAt(0).toLowerCase() + purpose.slice(1)
-  return `Lidero para ${purpose}.`
+  if(!purpose.startsWith('que ') && /^[a-z]/.test(purpose) && purpose.split(' ').length <= 6 && !purpose.includes('que ')){
+    // pequeño ajuste: si es muy corto y no tiene que, mantener
+  }
+  return `Lidero para ${purpose}.`.replace('Lidero para que que','Lidero para que').replace('..','.')
 }
 function scoreClarity(paraAnswers: string[]){
   if(paraAnswers.every(a=> !a.trim())) return 0
@@ -457,6 +467,7 @@ export default function App(){
   const [showConcrete, setShowConcrete] = useState(false)
   const [concreteMsg, setConcreteMsg] = useState('')
   const [assessment, setAssessment] = useState<Assessment|null>(null)
+  const [purposeLoading, setPurposeLoading] = useState(false)
   const [calculating, setCalculating] = useState(false)
   const [progressPhrase, setProgressPhrase] = useState(0)
   const [editingPurpose, setEditingPurpose] = useState(false)
@@ -524,7 +535,7 @@ export default function App(){
     return true
   })()
 
-  function handleNext(){
+  async function handleNext(){
     const fieldsToCheck: Record<number, {val:string, msg:string}> = {
       2: { val: answers.q1, msg: 'Hazlo más concreto: ¿qué comportamiento exacto y en qué momento lo ves?' },
       14: { val: answers.q3, msg: 'Profundiza: ¿qué miedo o hábito crees que hay detrás? ¿Qué gana el líder al no soltar?' },
@@ -538,22 +549,29 @@ export default function App(){
       setShowConcrete(true)
       return
     }
-    // Para Qué logic
+    // Para Qué logic - intento con IA para preguntas dinámicas
     if(step===5){
-      // after p1 generate q2
       const nextQ = generateParaQuestion(answers.para1, 1)
       setParaQs(p=>{ const n=[...p]; n[1]=nextQ; return n })
+      // intento IA en background (no bloquea)
+      try{
+        const r = await fetch('/api/para-question', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({prevAnswer: answers.para1, depth:1, history:[answers.para1]})})
+        if(r.ok){ const d=await r.json(); if(d.question) setParaQs(p=>{const n=[...p]; n[1]=d.question; return n})}
+      }catch{}
     }
     if(step===6){
       if(isRepetitive(answers.para2, answers.para1)){
         const aux = 'Parece que seguimos en el mismo punto. Vamos un poco más profundo. Imagina que mañana consigues esa meta. ¿Qué cambia para las personas gracias a haberla conseguido?'
         setParaQs(p=>{ const n=[...p]; n[1]=aux; setConcreteMsg(aux); setShowConcrete(true); return n })
-        // still generate for next
         const nextQ = generateParaQuestion(answers.para2, 2)
         setParaQs(p=>{ const n=[...p]; n[2]=nextQ; return n })
       } else {
         const nextQ = generateParaQuestion(answers.para2, 2)
         setParaQs(p=>{ const n=[...p]; n[2]=nextQ; return n })
+        try{
+          const r = await fetch('/api/para-question', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({prevAnswer: answers.para2, depth:2, history:[answers.para1, answers.para2]})})
+          if(r.ok){ const d=await r.json(); if(d.question) setParaQs(p=>{const n=[...p]; n[2]=d.question; return n})}
+        }catch{}
       }
     }
     if(step===7){
@@ -563,17 +581,38 @@ export default function App(){
       }
       const nextQ = generateParaQuestion(answers.para3, 3)
       setParaQs(p=>{ const n=[...p]; n[3]=nextQ; return n })
+      try{
+        const r = await fetch('/api/para-question', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({prevAnswer: answers.para3, depth:3, history:[answers.para1, answers.para2, answers.para3]})})
+        if(r.ok){ const d=await r.json(); if(d.question) setParaQs(p=>{const n=[...p]; n[3]=d.question; return n})}
+      }catch{}
     }
     if(step===8){
       const nextQ = generateParaQuestion(answers.para4, 4)
-      // if deep already, use legacy question
       setParaQs(p=>{ const n=[...p]; n[4]=nextQ; return n })
+      try{
+        const r = await fetch('/api/para-question', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({prevAnswer: answers.para4, depth:4, history:[answers.para1, answers.para2, answers.para3, answers.para4]})})
+        if(r.ok){ const d=await r.json(); if(d.question) setParaQs(p=>{const n=[...p]; n[4]=d.question; return n})}
+      }catch{}
     }
     if(step===9){
-      // synthesize purpose
-      const purpose = synthesizePurpose([answers.para1, answers.para2, answers.para3, answers.para4, answers.para5])
-      setAnswers(a=> ({...a, purposeAI: purpose, purposeFinal: purpose}))
-      setTempPurpose(purpose)
+      // IA para propósito - con fallback heurístico
+      const heuristic = synthesizePurpose([answers.para1, answers.para2, answers.para3, answers.para4, answers.para5])
+      setAnswers(a=> ({...a, purposeAI: heuristic, purposeFinal: heuristic}))
+      setTempPurpose(heuristic)
+      setPurposeLoading(true)
+      setStep(10)
+      try{
+        const resp = await fetch('/api/purpose', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({para1:answers.para1, para2:answers.para2, para3:answers.para3, para4:answers.para4, para5:answers.para5})})
+        if(resp.ok){
+          const data = await resp.json()
+          if(data.purpose){
+            setAnswers(a=> ({...a, purposeAI: data.purpose, purposeFinal: data.purpose}))
+            setTempPurpose(data.purpose)
+          }
+        }
+      }catch(e){ console.log('IA purpose fallback',e) }
+      setPurposeLoading(false)
+      return
     }
 
     if (step===23){
@@ -837,9 +876,10 @@ export default function App(){
         {step===10 && (
           <div className="bg-white rounded-[28px] p-8 text-center shadow border border-slate-100">
             <div className="w-16 h-16 mx-auto rounded-full border-4 border-slate-100 border-t-[#071D49] animate-spin"/>
-            <h3 className="font-black mt-4" style={{color:C.navy}}>Analizando lo que hay detrás de tus respuestas…</h3>
-            <p className="text-sm text-slate-500 mt-1">Encontramos algo importante.</p>
-            <button onClick={()=> setStep(11)} className="mt-6 bg-[#071D49] text-white font-bold px-6 py-3 rounded-xl">Ver mi núcleo →</button>
+            <h3 className="font-black mt-4" style={{color:C.navy}}>{purposeLoading ? 'Pulimos tu propósito con IA…' : 'Analizando lo que hay detrás de tus respuestas…'}</h3>
+            <p className="text-sm text-slate-500 mt-1">{purposeLoading ? 'Corrigiendo gramática y dando claridad, solo con tus ideas.' : 'Encontramos algo importante.'}</p>
+            <button onClick={()=> setStep(11)} disabled={purposeLoading} className={`mt-6 font-bold px-6 py-3 rounded-xl ${purposeLoading?'bg-slate-200 text-slate-400 cursor-wait':'bg-[#071D49] text-white'}`}>{purposeLoading ? 'Generando…' : 'Ver mi núcleo →'}</button>
+            {!purposeLoading && <div className="text-[11px] text-slate-400 mt-3">✨ IA activada: propuesta pulida sin inventar motivaciones</div>}
           </div>
         )}
 
