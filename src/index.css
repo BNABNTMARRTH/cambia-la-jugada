@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+* { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+h1,h2,h3 { font-family: 'Inter', system-ui, sans-serif; letter-spacing: -0.02em; }
+
+/* custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 999px; }
+
+/* animations */
+@keyframes float { 0%,100% { transform: translateY(0)} 50% { transform: translateY(-6px)} }
+@keyframes pulse-soft { 0%,100% { opacity:1 } 50% { opacity:0.7 } }
+@keyframes shimmer { 0% { background-position: -200% 0 } 100% { background-position: 200% 0 } }
