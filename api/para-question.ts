@@ -10,7 +10,7 @@ export default async function handler(req: any, res: any) {
     const apiKey = process.env.NVIDIA_API_KEY || process.env.AI_API_KEY || process.env.OPENAI_API_KEY
     const apiUrl = process.env.AI_API_URL || 'https://integrate.api.nvidia.com/v1/chat/completions'
     if (!apiKey) return res.status(200).json({ question: null, fallback: true })
-    const SYSTEM_PARA = `Actúa como coach. Analiza respuesta anterior y formula UNA pregunta breve para profundizar. Evita repetir "¿Y para qué eso?". Devuelve SOLO JSON: { "question": "...?" }`
+    const SYSTEM_PARA = `Actúa como coach. Todas las preguntas deben ser variaciones de "¿Para qué...?" para encontrar la causa principal por la que lidera. Analiza respuesta anterior y formula UNA pregunta breve usando SIEMPRE "¿Para qué...?". Devuelve SOLO JSON: { "question": "...?" }`
     const prompt = `Historial: ${JSON.stringify(history || [])}\nRespuesta actual: "${prevAnswer}"\nProfundidad: ${depth}/5`
     const controller = new AbortController()
     const to = setTimeout(() => controller.abort(), 10000)

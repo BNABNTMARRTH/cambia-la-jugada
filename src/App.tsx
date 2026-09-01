@@ -121,13 +121,13 @@ function generateParaQuestion(prev:string, idx:number){
   if((coreLower.includes('ayudar') || coreLower.includes('apoyar')) && prev.trim().length<30){
     return '¿A quién quieres ayudar y qué quisieras que cambie para esa persona?'
   }
-  // repetitive will be handled by caller, but fallback - evitando "que + infinitivo" (ej. "que evitar" es incorrecto)
+  // Todas deben ser "¿Para qué...?" para llegar a la causa raíz
   const templates:string[]=[
     `Dijiste que quieres "${core}". ¿Para qué es importante para ti que eso suceda?`,
     `¿Y para qué es importante para ti "${core}"?`,
-    `¿Qué cambiaría si logras "${core}"?`,
-    `¿Qué hace que eso sea realmente importante para ti?`,
-    `Si consiguieras eso durante los próximos años, ¿qué te gustaría que esas personas recordaran de tu liderazgo?`
+    `¿Para qué quieres lograr "${core}"?`,
+    `¿Para qué es realmente importante para ti "${core}" más allá del resultado?`,
+    `¿Para qué te gustaría que, si logras "${core}" durante los próximos años, eso trascienda en tu equipo?`
   ]
   // idx 1-> template 0, idx2->1, idx3->2, idx4->3, idx5 special 4 if deep
   if(idx===1) return templates[0]
@@ -475,6 +475,14 @@ export default function App(){
   const mainRef = useRef<HTMLDivElement>(null)
 
   useEffect(()=>{ mainRef.current?.scrollTo(0,0); window.scrollTo(0,0) },[step])
+
+  // auto-avance del "Analizando..." cuando la IA termina
+  useEffect(()=>{
+    if(step===10 && !purposeLoading){
+      const t = setTimeout(()=> setStep(11), 1400)
+      return ()=> clearTimeout(t)
+    }
+  },[step, purposeLoading])
 
   // total steps 0..24
   const totalQuestions = 18
@@ -877,9 +885,9 @@ export default function App(){
           <div className="bg-white rounded-[28px] p-8 text-center shadow border border-slate-100">
             <div className="w-16 h-16 mx-auto rounded-full border-4 border-slate-100 border-t-[#071D49] animate-spin"/>
             <h3 className="font-black mt-4" style={{color:C.navy}}>{purposeLoading ? 'Pulimos tu propósito con IA…' : 'Analizando lo que hay detrás de tus respuestas…'}</h3>
-            <p className="text-sm text-slate-500 mt-1">{purposeLoading ? 'Corrigiendo gramática y dando claridad, solo con tus ideas.' : 'Encontramos algo importante.'}</p>
+            <p className="text-sm text-slate-500 mt-1">{purposeLoading ? 'Corrigiendo gramática y dando claridad, solo con tus ideas.' : 'Encontramos algo importante. Avanzando automáticamente...'}</p>
             <button onClick={()=> setStep(11)} disabled={purposeLoading} className={`mt-6 font-bold px-6 py-3 rounded-xl ${purposeLoading?'bg-slate-200 text-slate-400 cursor-wait':'bg-[#071D49] text-white'}`}>{purposeLoading ? 'Generando…' : 'Ver mi núcleo →'}</button>
-            {!purposeLoading && <div className="text-[11px] text-slate-400 mt-3">✨ IA activada: propuesta pulida sin inventar motivaciones</div>}
+            {!purposeLoading && <div className="text-[11px] text-slate-400 mt-3">✨ IA activada: pulido con “¿Para qué…?” sin inventar motivaciones • Avance automático en 1s</div>}
           </div>
         )}
 
